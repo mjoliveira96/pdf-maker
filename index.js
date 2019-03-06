@@ -9,8 +9,9 @@ function pdfMaker(template, data, pdfPath, option) {
 
     var fileExtension = template.split('/').pop().split('.').pop();
 
-    if (fileExtension === 'html') {
-        option = pdfPath || {
+    return new Promise(function (resolve, reject) {
+        if (fileExtension === 'html') {
+            option = pdfPath || {
                 paperSize: {
                     format: 'A4',
                     orientation: 'portrait',
@@ -18,27 +19,27 @@ function pdfMaker(template, data, pdfPath, option) {
                 }
             };
 
-        pdfPath = data;
+            pdfPath = data;
 
-        fs.readFile(template, 'utf8', function (err, html) {
-            if (err) {
-                throw err;
+            fs.readFile(template, 'utf8', function (err, html) {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+
+                createSession(html, pdfPath, option, resolve, reject);
+            });
+
+        } else if (fileExtension === 'ejs') {
+            if (!data) {
+                console.log('Please provide data object');
             }
 
-            createSession(html, pdfPath, option);
+            if (!pdfPath) {
+                console.log('Please provide file path of the pdf');
+            }
 
-        });
-
-    } else if (fileExtension === 'ejs') {
-        if (!data) {
-            console.log('Please provide data object');
-        }
-
-        if (!pdfPath) {
-            console.log('Please provide file path of the pdf');
-        }
-
-        option = option || {
+            option = option || {
                 paperSize: {
                     format: 'A4',
                     orientation: 'portrait',
@@ -46,41 +47,50 @@ function pdfMaker(template, data, pdfPath, option) {
                 }
             };
 
-        fs.readFile(template, 'utf8', function (err, file) {
-            if (err) {
-                throw err;
-            }
+            fs.readFile(template, 'utf8', function (err, file) {
+                if (err) {
+                    reject(err);
+                    return;
+                }
 
-            var html = ejs.render(file, data);
-            createSession(html, pdfPath, option);
-        });
+                try {
+                    var html = ejs.render(file, data);
+                } catch (e) {
+                    reject(e);
+                    return;
+                }
+                createSession(html, pdfPath, option, resolve, reject);
+            });
 
-    } else {
-        console.log('Unknown file extension')
-    }
+        } else {
+            reject('Unknown file extension')
+        }
+    });
 }
 
-function createSession(html, pdfPath, option) {
+function createSession(html, pdfPath, option, callback, error) {
     if (_session) {
-        createPage(_session, html, pdfPath, option);
+        createPage(_session, html, pdfPath, option, callback, error);
     } else {
         phantom.create({
             path: phantomjs.path
         }, function (err, session) {
             if (err) {
-                throw err;
+                error(err);
+                return;
             }
 
             _session = session;
-            createPage(session, html, pdfPath, option)
+            createPage(session, html, pdfPath, option, callback, error)
         });
-    }    
+    }
 }
 
-function createPage (session, html, pdfPath, option) {
+function createPage(session, html, pdfPath, option, callback, error) {
     session.createPage(function (err, page) {
         if (err) {
-            throw err;
+            error(err);
+            return;
         }
 
         _.forEach(option, function (val, key) {
@@ -89,17 +99,20 @@ function createPage (session, html, pdfPath, option) {
 
         page.set('content', html, function (err) {
             if (err) {
-                throw err;
+                error(err);
+                return;
             }
         });
 
         page.onLoadFinished = function (status) {
-            page.render(pdfPath, function (error) {
+            page.render(pdfPath, function (err) {
                 page.close();
                 page = null;
-                if (error) {
-                    throw err;
+                if (err) {
+                    error(err);
+                    return;
                 }
+                callback();
             });
         };
     });
